@@ -8,6 +8,9 @@
 SFE_UBLOX_GNSS HAM_GNSS; // ZED-F9P
 SFE_UBLOX_GNSS HAM_GNSS_L_Band; // NEO-D9S
 
+const uint32_t LBand_frequency = 1556290000; //L-Band Frequency in Hz. get updated frequency from u-blox mqtt protocal eventually
+
+
 
 // OLED Display Setup
 #define SCREEN_WIDTH 128 // OLED Width in pixels
@@ -94,6 +97,46 @@ void setup() {
   }
 
   Serial.println("u-blox NEO-D9S connected");
+
+  //NEO-D9S Setup
+  uint8_t ok = HAM_GNSS_L_Band.addCfgValset32(UBLOX_CFG_PMP_CENTER_FREQUENCY, LBand_frequency); // Default 1539812500 Hz  32bit val
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset16(UBLOX_CFG_PMP_SEARCH_WINDOW, 2200); // Default 2200 Hz
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset8(UBLOX_CFG_PMP_USE_SERVICE_ID, 0); // Default 1
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset16(UBLOX_CFG_PMP_SERVICE_ID, 21845); //50821
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset16(UBLOX_CFG_PMP_DATA_RATE, 2400); // Default 2400 bps
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset8(UBLOX_CFG_PMP_USE_DESCRAMBLER, 1); // Default 1
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset16(UBLOX_CFG_PMP_DESCRAMBLER_INIT, 26969); // Default 23560
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset8(UBLOX_CFG_PMP_USE_PRESCRAMBLING, 0); // Default 0
+  if (ok) ok = HAM_GNSS_L_Band.addCfgValset(UBLOX_CFG_PMP_UNIQUE_WORD, 16238547128276412563ull); // 0xE15AE893E15AE893
+
+  // Configure NEO-D9S Baud rate to match ZED-F9P's baud rate
+  if(ok) ok = HAM_GNSS_L_Band.addCfgValset(UBLOX_CFG_UART2_BAUDRATE, 38400); // match baudrate with ZED default
+  if(ok) ok = HAM_GNSS_L_Band.addCfgValset(UBLOX_CFG_UART2OUTPROT_UBX, 1); // Enable UBX output on UART2
+  if(ok) ok = HAM_GNSS_L_Band.addCfgValset(UBLOX_CFG_MSGOUT_UBX_RXM_PMP_UART2, 1); // Output UBX-RXM-PMP on UART2
+
+  Serial.print("L-Band configuration: ");
+  if (ok)
+    Serial.println("OK");
+  else
+    Serial.println("NOT OK!");
+
+  HAM_GNSS_L_Band.softwareResetGNSSOnly();
+
+  // ZED-F9P Setup
+  ok = HAM_GNSS.setI2CInput(COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_SPARTN); //Be sure SPARTN input is enabled
+  if(ok) ok = HAM_GNSS.setDGNSSConfiguration(SFE_UBLOX_DGNSS_MODE_FIXED); // set the differential mode - ambiguties
+  if(ok) ok = HAM_GNSS.addCfgValset8(UBLOX_CFG_SPARTN_USE_SOURCE, 1); // use LBAND PMP message
+
+  if (ok) ok = HAM_GNSS.setDynamicSPARTNKeys(16,2294, 0, "d8f33f27fc2afd1db1624d5a45817d71", 16, 2297, 0, "9a5899dc0b6313245219d303f281db77"); // add encryption keys to decript NEO-DS9 messages.
+  
+
+  Serial.print("GNSS: configuration ");
+  if (ok)
+    Serial.println("OK");
+  else
+    Serial.println("NOT OK!");
+
+  HAM_GNSS.softwareResetGNSSOnly();
 }
 
 void loop() {
@@ -140,6 +183,39 @@ String Send_Index_HTML() {
   page += "<a href=\"start_survey\">Start Survey</a>\n";
   page += "<a href=\"view_survey_log\">View Survey Log</a>\n";
   page += "<a href=\"gnss_info\">GNSS Info</a>";
+  page += "<h4 style=\"text-align: center;\">Latitude & Longitude Cordinates: </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getLatitude();
+  page += ", ";
+  page += HAM_GNSS_L_Band.getLongitude();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Fix Type : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getFixType();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Heading : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getHeading();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Mean Sea Level : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getMeanSeaLevel();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Measurement rate : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getMeasurementRate();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Elipsoid : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += HAM_GNSS_L_Band.getElipsoid();
+  page += "</p>\n";
+  page += "<h4 style=\"text-align: center;\">Altitude : </h4>\n";
+  page += "<p style=\"text-align: center;\">";
+  page += "Altitude: ";
+  page += HAM_GNSS_L_Band.getAltitude();
+  page += ", Mean Sea Level Alitutude: ";
+  page += HAM_GNSS_L_Band.getAltitudeMSL();
+  page += "</p>\n";
   page += "<p style=\"margin-top:10px;\">Created By Zion Johnson </p> <a href=\"https://github.com/zion379\">Github Portfolio</a>\n";
   page += "</body>\n";
   page += "</html>\n";
