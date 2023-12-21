@@ -223,6 +223,7 @@ void loop() {
 
   if ((now - ublox_previousMillis > ublox_msg_check_interval)) {
     HAM_GNSS.checkUblox();
+    HAM_GNSS.checkCallbacks();
     ublox_previousMillis = now;
   }
 
