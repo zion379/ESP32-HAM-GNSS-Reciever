@@ -747,7 +747,7 @@ void start_survey_observation() {
     webSocket.broadcastTXT(jsonString);
 
     // Start Survey
-    response = HAM_GNSS.enableSurveyMode(60, 40, VAL_LAYER_RAM, 60); // Enable Survey in, 60 secoonds 66m of accuracy Save setting in RAM layer only (not BBR)
+    response = HAM_GNSS.enableSurveyMode(60, 5.00, VAL_LAYER_RAM); // Enable Survey in, 60 secoonds 5m of accuracy Save setting in RAM layer only (not BBR)
     if(response == false) {
       display_info("Survey Start Failed");
       // Send Survey Status
