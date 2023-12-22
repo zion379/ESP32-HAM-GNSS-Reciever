@@ -72,6 +72,11 @@ void stop_survey_observation();
 
 // surveying vars
 bool survey_in_progress = false;
+float survey_desired_accuracy = 6.00; // value is in meters
+
+// surveying callback functions
+void printPVTdata(UBX_NAV_PVT_data_t *ubxDataStruct);
+void newRAWX(UBX_RXM_RAWX_data_t *ubxDataStruct);
 
 // Web Communication json vars
 StaticJsonDocument<400> json_doc_tx;
@@ -156,6 +161,7 @@ void setup() {
     Serial.println("NOT OK!");
   }
 
+
   HAM_GNSS_L_Band.softwareResetGNSSOnly();
 
   // ZED-F9P Setup
@@ -179,6 +185,8 @@ void setup() {
     Serial.println("NOT OK!");
   }
     
+  //HAM_GNSS.setAutoPVTcallbackPtr(&printPVTdata); // Enable automativ NAV PVT messages with callback to printPVTdata
+  //HAM_GNSS.setAutoRXMRAWXcallbackPtr(&newRAWX);
 
   HAM_GNSS.softwareResetGNSSOnly();
 
@@ -248,7 +256,7 @@ void loop() {
       object["altitude_msl"] = String(altitude_msl);
 
       serializeJson(object, JsonString);
-      Serial.println(JsonString);
+      //Serial.println(JsonString);
       webSocket.broadcastTXT(JsonString);
       previousMillis = now;
 
@@ -353,13 +361,21 @@ String Send_Start_Survey_HTML() {
   page += WebsiteBaseCSS();
   page += "<h1 style=\"text-align: center; font-weight: bold\">High Altitude Media GNSS Reciver</h1>\n";
   page += "<h3 style=\"text-align: center;\"> Start Survey </h3>\n";
-  page += "<h5 style=\"text-align: center;\"> Survey Status: <span id='survey_status'>inactive</span> </h5>\n";
-  page += "<h6 id='survey_msg' style='display: none; text-align: center;'></h6>\n";
-  page += "<h6 id='survey_time' style='display: none; text-align: center;'></h6>\n";
-  page += "<h6 id='survey_accuracy' style='display: none; text-align: center;'></h6>\n";
+  page += "<h4 style=\"text-align: center;\"> Survey Status: <span id='survey_status'>inactive</span> </h4>\n";
+  page += "<h4 id='survey_msg' style='display: none; text-align: center;'></h4>\n";
+  page += "<h4 id='survey_time' style='display: none; text-align: center;'></h4>\n";
+  page += "<h4 id='survey_accuracy' style='display: none; text-align: center;'></h4>\n";
+  page += "<h5 id='survey_desired_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<label id='accuracy_input_label' for='target_accuracy_input'>Enter Target Accuracy:</label>\n";
+  page += "<input type='number' id='target_accuracy_input' name='target_accuracy_input' min='0.08' max='100'>\n";
+  page += "<button type='button' id='set_target_accuracy'> Set Target Accuracy </button>\n";
+  page += "<h5 id='pos_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<h5 id='vert_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<h5 id='horz_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
   page += "<p style=\"text-align: center;\">Latitude: <span id='latitude'> lat value </span> , Longitude: <span id='longitude'> long val</span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude : <span id='altitude'> altitude value </span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude above MSL : <span id='altitude_msl'> MSL Altitude Val</p>\n";
+  page += "<h5 id='mean_sea_lvl' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
   page += "<button type='button' id='BTN_SEND_BACK' disabled> Send info to esp32 </button>\n";
   page += "<button type='button' id='start_survey' disabled> Start Survey </button>\n";
   page += "<button type='button' id='stop_survey' disabled> Stop Survey </button>\n";
@@ -490,6 +506,12 @@ String Client_WebSocketJS() {
   script += " var message = {survey: 'STOP'};\n";
   script += " Socket.send(JSON.stringify(message));\n";
   script += "}\n";
+  script += "document.getElementById('set_target_accuracy').addEventListener('click', set_target_accuracy);\n";
+  script += "function set_target_accuracy() {\n";
+  script += " var target_accuracy_input = document.getElementById('target_accuracy_input')\n";
+  script += " var message = {set_target_accuracy: target_accuracy_input.value};\n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += "}\n";
   script += "\n";
   script += "function init() {\n";
   script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
@@ -532,12 +554,18 @@ String Client_WebSocketJS() {
   script += "       break;\n";
   script += "     case 'started':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Started!';\n";
+  script += "       document.getElementById('target_accuracy_input').style.display = 'none';\n";
+  script += "       document.getElementById('set_target_accuracy').style.display = 'none';\n";
+  script += "       document.getElementById('accuracy_input_label').style.display = 'none';\n";
   script += "       break;\n";
   script += "     case 'survey_start_failed':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Start Failed.';\n";
   script += "       break;\n";
   script += "     case 'stopped':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Stopped';\n";
+  script += "       document.getElementById('target_accuracy_input').style.display = 'block';\n";
+  script += "       document.getElementById('set_target_accuracy').style.display = 'block';\n";
+  script += "       document.getElementById('accuracy_input_label').style.display = 'block';\n";
   script += "       break;\n";
   script += "   }\n";
   script += "  }\n";
@@ -560,10 +588,50 @@ String Client_WebSocketJS() {
   script += " if (obj.survey_accuracy) {\n";
   script += "   var survey_accuracy_el = document.getElementById('survey_accuracy');\n";
   script += "   survey_accuracy_el.style.display = 'block';\n";
-  script += "   survey_accuracy_el.textContent = 'Accuracy: ' + obj.survey_accuracy + 'M';\n";
+  script += "   survey_accuracy_el.textContent = 'Mean Accuracy: ' + obj.survey_accuracy;\n";
   script += " } else {\n";
   script += "   var survey_accuracy_el = document.getElementById('survey_accuracy');\n";
   script += "   survey_accuracy_el.style.display = 'none';\n";
+  script += " }\n";
+  script += " if (obj.survey_desired_accuracy) {\n";
+  script += "   var desired_accuracy_el = document.getElementById('survey_desired_accuracy');\n";
+  script += "   desired_accuracy_el.style.display = 'block';\n";
+  script += "   desired_accuracy_el.textContent = 'Target Accuracy: ' + obj.survey_desired_accuracy;\n";
+  script += " } else {\n";
+  script += "   var desired_accuracy_el = document.getElementById('survey_desired_accuracy');\n";
+  script += "   desired_accuracy_el.style.display = 'block';\n";
+  script += " }\n";
+  script += " if (obj.survey_lat && obj.survey_long) {\n";
+  script += "   var survey_lat_el = document.getElementById('latitude');\n";
+  script += "   var survey_long_el = document.getElementById('longitude');\n";
+  script += "   survey_lat_el.innerHTML = obj.survey_lat;\n";
+  script += "   survey_long_el.innerHTML = obj.survey_long;\n";
+  script += " }\n";
+  script += " if (obj.survey_altitude && obj.survey_altitude_msl && obj.survey_msl) {\n";
+  script += "   var survey_altitude_el = document.getElementById('altitude');\n";
+  script += "   var survey_altitude_msl_el = document.getElementById('altitude_msl');\n";
+  script += "   var survey_msl_el = document.getElementById('mean_sea_lvl');\n"; // create this el
+  script += "   survey_altitude_el.innerHTML = obj.survey_altitude;\n";
+  script += "   survey_altitude_msl_el.innerHTML = obj.survey_altitude_msl;\n";
+  script += "   survey_msl_el.textContent = 'Mean Sea Level ' + obj.survey_msl;\n";
+  script += " }\n";
+  script += " if (obj.survey_pos_accuracy && obj.survey_vertical_accuracy && obj.survey_horizontal_accuracy) {\n";
+  script += "   var survey_pos_accuracy_el = document.getElementById('pos_accuracy');\n";
+  script += "   var survey_vert_accuracy_el = document.getElementById('vert_accuracy');\n";
+  script += "   var survey_horz_accuracy_el = document.getElementById('horz_accuracy');\n";
+  script += "   survey_pos_accuracy_el.style.display = 'block';\n";
+  script += "   survey_vert_accuracy_el.style.display = 'block';\n";
+  script += "   survey_horz_accuracy_el.style.display = 'block';\n";
+  script += "   survey_pos_accuracy_el.textContent = 'position accuracy: ' + obj.survey_pos_accuracy;\n";
+  script += "   survey_vert_accuracy_el.textContent = 'vertical accuracy: ' + obj.survey_vertical_accuracy + '(mm)';\n";
+  script += "   survey_horz_accuracy_el.textContent = 'horizontal accuracy: ' + obj.survey_horizontal_accuracy + '(mm)';\n";
+  script += " } else {\n";
+  script += "   var survey_pos_accuracy_el = document.getElementById('pos_accuracy');\n";
+  script += "   var survey_vert_accuracy_el = document.getElementById('vert_accuracy');\n";
+  script += "   var survey_horz_accuracy_el = document.getElementById('horz_accuracy');\n";
+  script += "   survey_pos_accuracy_el.style.display = 'none';\n";
+  script += "   survey_vert_accuracy_el.style.display = 'none';\n";
+  script += "   survey_horz_accuracy_el.style.display = 'none';\n";
   script += " }\n";
   script += "}\n";
   script += "window.onload = function(event) {\n";
@@ -632,6 +700,13 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
     break;
   case WStype_CONNECTED:
     Serial.println("Client Connected"); // broadcast message to client via json object.
+    if (HAM_GNSS.getSurveyInValid() == false) {
+      String jsonString = "";
+      JsonObject object = json_doc_tx.to<JsonObject>();
+      object["survey_status"] = "in_progress";
+      serializeJson(object, jsonString);
+      webSocket.broadcastTXT(jsonString);
+    }
     break;
   case WStype_TEXT:
     DeserializationError error =  deserializeJson(json_doc_rx, payload);
@@ -658,6 +733,13 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
           Serial.print("Stopping Survey");
           stop_survey_observation();
         }
+      }
+
+      if(json_doc_rx["set_target_accuracy"]) {
+        Serial.print("Set new target accuracy to: ");
+        float new_accuracy_val = json_doc_rx["set_target_accuracy"];
+        Serial.println(new_accuracy_val);
+        survey_desired_accuracy = new_accuracy_val;
       }
     }
     break;
@@ -728,14 +810,13 @@ void start_survey_observation() {
     while(1); // freeze
   }
 
-  if (HAM_GNSS.getSurveyInActive() == true) {
+  if (HAM_GNSS.getSurveyInActive() == false && survey_in_progress) {
     Serial.print("Survey already in progress.");
     display_info("Survey already in progress");
     // Send Survey Status
     object["survey_status"] = "in_progress";
     serializeJson(object, jsonString);
     webSocket.broadcastTXT(jsonString);
-    survey_in_progress = true;
   }
   else {
     // Start Survey
@@ -744,11 +825,12 @@ void start_survey_observation() {
 
     // Send Survey Status
     object["survey_status"] = "started";
+    object["survey_desired_accuracy"] = survey_desired_accuracy;
     serializeJson(object, jsonString);
     webSocket.broadcastTXT(jsonString);
 
     // Start Survey
-    response = HAM_GNSS.enableSurveyMode(60, 5.00, VAL_LAYER_RAM); // Enable Survey in, 60 secoonds 5m of accuracy Save setting in RAM layer only (not BBR)
+    response = HAM_GNSS.enableSurveyMode(60, survey_desired_accuracy, VAL_LAYER_RAM); // Enable Survey in, 60 secoonds 5m of accuracy Save setting in RAM layer only (not BBR)
     if(response == false) {
       display_info("Survey Start Failed");
       // Send Survey Status
@@ -757,25 +839,33 @@ void start_survey_observation() {
       webSocket.broadcastTXT(jsonString);
       while (1);
     }
-
-    display_info("Survey In progress");
-    
-    survey_in_progress = true; // set global survey variable
+    else {
+      survey_in_progress = true; // set global survey variable
+    }
   }
 }
 
 void handle_survey_observation_in_progress() {
+  if(HAM_GNSS.getSurveyInValid() == false  && survey_in_progress) { // check if survey is in progress
 
-  if(HAM_GNSS.getSurveyInValid() == false && survey_in_progress) { // check if survey is in progress
     // dashboard send data json object
     String jsonString = "";
     JsonObject object = json_doc_tx.to<JsonObject>();
 
     bool response = HAM_GNSS.getSurveyStatus(2000); // Query module for SVIN status with 2000ms timeout (req can take a long time)
+    delay(100); // give time for survey to start
     if(response == true) {
       object["survey_status"] = "in_progress";
       object["survey_time_elapsed"] = (String)HAM_GNSS.getSurveyInObservationTime();
       object["survey_accuracy"] = (String)HAM_GNSS.getSurveyInMeanAccuracy();
+      object["survey_lat"] = (String)HAM_GNSS.getHighResLatitude();
+      object["survey_long"] = (String)HAM_GNSS.getHighResLongitude();
+      object["survey_altitude"] = (String)HAM_GNSS.getAltitude(); // create js func from here down
+      object["survey_altitude_msl"] = (String)HAM_GNSS.getAltitudeMSL();
+      object["survey_msl"] = (String)HAM_GNSS.getMeanSeaLevel();
+      object["survey_pos_accuracy"] = (String)HAM_GNSS.getPositionAccuracy();
+      object["survey_vertical_accuracy"] = (String)HAM_GNSS.getVerticalAccuracy();
+      object["survey_horizontal_accuracy"] = (String)HAM_GNSS.getHorizontalAccuracy();
       serializeJson(object, jsonString);
       webSocket.broadcastTXT(jsonString);
 
@@ -793,9 +883,7 @@ void handle_survey_observation_in_progress() {
       display_info("SVIN request failed");
     }
 
-  } else {
-    if(HAM_GNSS.getSurveyInValid() && survey_in_progress) { // survey is invalid
-      survey_in_progress = false; // set survey in progress to false
+  } else if(HAM_GNSS.getSurveyInValid() && survey_in_progress) { // survey is invalid
 
       // dashboard send data json object
       String jsonString = "";
@@ -809,7 +897,6 @@ void handle_survey_observation_in_progress() {
       display_info("Survey Finished Transmitting RTCM");
       stop_survey_observation();
     }
-  }
 }
 
 void stop_survey_observation() {
@@ -818,7 +905,7 @@ void stop_survey_observation() {
     JsonObject object = json_doc_tx.to<JsonObject>();
 
   // check if survey is already going
-  if(survey_in_progress) {
+  if(!HAM_GNSS.getSurveyInValid() || survey_in_progress) {
     bool response = HAM_GNSS.disableSurveyMode(); // disable survey mode.
     if(response) {
       display_info("Survey Observation Stopped.");
@@ -830,42 +917,97 @@ void stop_survey_observation() {
     } else {
       display_info("Attempted to stop survey. but failed");
 
-      object["survey_status"] = "stop failed";
+      object["survey_status"] = "stop_failed";
       object["survey_msg"] = "Attempted to stop survey. but failded.";
       serializeJson(object, jsonString);
       webSocket.broadcastTXT(jsonString);
+      survey_in_progress = false;
     }
   } else {
     display_info("Attempted to stop survey but there are no survey in progress.");
 
     object["survey_status"] = "stopped";
-      object["survey_msg"] = "Attempted  to stop survey but there was no survey in progress.";
-      serializeJson(object, jsonString);
-      webSocket.broadcastTXT(jsonString);
+    object["survey_msg"] = "Attempted  to stop survey but there was no survey in progress.";
+    serializeJson(object, jsonString);
+    webSocket.broadcastTXT(jsonString);
+    survey_in_progress = false;
   }
 }
 
-//This function gets called from the SparkFun u-blox Arduino Library.
-//As each RTCM byte comes in you can specify what to do with it
-//Useful for passing the RTCM correction data to a radio, Ntrip broadcaster, etc.
-
-void DevUBLOXGNSS::processRTCM(uint8_t incoming)
+void printPVTdata(UBX_NAV_PVT_data_t *ubxDataStruct)
 {
-  static uint16_t byteCounter = 0;
+    Serial.println();
 
-  //Pretty-print the HEX values to Serial
-  if (HAM_GNSS.rtcmFrameCounter == 1)
+    Serial.print(F("Time: ")); // Print the time
+    uint8_t hms = ubxDataStruct->hour; // Print the hours
+    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
+    Serial.print(hms);
+    Serial.print(F(":"));
+    hms = ubxDataStruct->min; // Print the minutes
+    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
+    Serial.print(hms);
+    Serial.print(F(":"));
+    hms = ubxDataStruct->sec; // Print the seconds
+    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
+    Serial.print(hms);
+    Serial.print(F("."));
+    unsigned long millisecs = ubxDataStruct->iTOW % 1000; // Print the milliseconds
+    if (millisecs < 100) Serial.print(F("0")); // Print the trailing zeros correctly
+    if (millisecs < 10) Serial.print(F("0"));
+    Serial.print(millisecs);
+
+    long latitude = ubxDataStruct->lat; // Print the latitude
+    Serial.print(F(" Lat: "));
+    Serial.print(latitude);
+
+    long longitude = ubxDataStruct->lon; // Print the longitude
+    Serial.print(F(" Long: "));
+    Serial.print(longitude);
+    Serial.print(F(" (degrees * 10^-7)"));
+
+    long altitude = ubxDataStruct->hMSL; // Print the height above mean sea level
+    Serial.print(F(" Height above MSL: "));
+    Serial.print(altitude);
+    Serial.println(F(" (mm)"));
+}
+
+void newRAWX(UBX_RXM_RAWX_data_t *ubxDataStruct)
+{
+  Serial.println();
+
+  Serial.print(F("New RAWX data received. It contains "));
+  Serial.print(ubxDataStruct->header.numMeas); // Print numMeas (Number of measurements / blocks)
+  Serial.println(F(" data blocks:"));
+
+  for (uint8_t block = 0; block < ubxDataStruct->header.numMeas; block++) // For each block
   {
-    byteCounter = 0;
+    Serial.print(F("GNSS ID: "));
+    if (ubxDataStruct->blocks[block].gnssId < 100) Serial.print(F(" ")); // Align the gnssId
+    if (ubxDataStruct->blocks[block].gnssId < 10) Serial.print(F(" ")); // Align the gnssId
+    Serial.print(ubxDataStruct->blocks[block].gnssId);
+    Serial.print(F("  SV ID: "));
+    if (ubxDataStruct->blocks[block].svId < 100) Serial.print(F(" ")); // Align the svId
+    if (ubxDataStruct->blocks[block].svId < 10) Serial.print(F(" ")); // Align the svId
+    Serial.print(ubxDataStruct->blocks[block].svId);
+
+    if (sizeof(double) == 8) // Check if our processor supports 64-bit double
+    {
+      // Convert prMes from uint8_t[8] to 64-bit double
+      // prMes is little-endian
+      double pseudorange;
+      memcpy(&pseudorange, &ubxDataStruct->blocks[block].prMes, 8);
+      Serial.print(F("  PR: "));
+      Serial.print(pseudorange, 3);
+
+      // Convert cpMes from uint8_t[8] to 64-bit double
+      // cpMes is little-endian
+      double carrierPhase;
+      memcpy(&carrierPhase, &ubxDataStruct->blocks[block].cpMes, 8);
+      Serial.print(F(" m  CP: "));
+      Serial.print(carrierPhase, 3);
+      Serial.print(F(" cycles"));
+    }
     Serial.println();
   }
-  if (byteCounter % 16 == 0)
-    Serial.println();
-  
-  if (incoming < 0x10) Serial.print(F("0"));
-  Serial.print(incoming, HEX);
-  Serial.print(F(" "));
-  
-  byteCounter++;
 }
 
