@@ -488,7 +488,9 @@ String Send_Device_Files_HTML() {
   page += "<h1 style=\"text-align: center; font-weight: bold\">High Altitude Media GNSS Reciver</h1>\n";
   page += "<h3 style=\"text-align: center;\"> Device Files </h3>\n";
   page += "<h4 style=\"text-align: center;\">Folders on GNSS Reciever:</h4>\n";
+  page += "<div id='file_list_view'>\n";
   page += listFiles_HTML("/");
+  page += "</div>\n";
   page += "<div id='file_btn_controls' style='text-align: center; display: none;'>\n";
   page += " <label for='new_file_name_input'>New File Name:</label>\n";
   page += " <input type='text' id='new_file_name_input' name='new_file_name_input'></input>\n";
@@ -732,8 +734,18 @@ String Files_Client_WebSocketJS() {
   script += "}\n";
   script += "function processCommand(event) {\n"; // update elements with data
   script += " var obj = JSON.parse(event.data)\n";
-  script += " if(obj.update_view) {\n";
-  script += " console.log(obj.files);\n"; // testing, for now print json from websocket. handling updating the file list view here.
+  script += " if(obj.update_view == 'file_list') {\n";
+  script += "   var parentElement = document.getElementById('file_list_view');\n";
+  script += "   var old_file_list_elements = document.getElementsByClassName('file_list_item');\n";
+  script += "   console.log(obj.files);\n"; // testing, for now print json from websocket. handling updating the file list view here.
+  script += "   parentElement.innerHTML = '';\n"; // testing, remove later
+  script += "   obj.files.forEach( function(file){\n";
+  script += "     var file_element = document.createElement('p');\n";
+  script += "     file_element.classList.add('file_list_item');\n";
+  script += "     file_element.textContent = file;\n";
+  script += "     file_element.style.textAlign = 'center';\n";
+  script += "     parentElement.appendChild(file_element);\n";
+  script += "   });\n";
   script += " }\n";
   script += "}\n";
   script += "window.onload = function(event) {\n";
