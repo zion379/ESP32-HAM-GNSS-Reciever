@@ -34,6 +34,11 @@ String listFiles_HTML(const char *dirName);
 const char* ssid = "HAM_GNSS";
 const char* password = "pass1234";
 
+// SD functions
+void save_survey_observation();
+void create_file(String file_name);
+void delete_file(String file_name);
+
 WebServer server(80); // Create server on port 80
 WebSocketsServer webSocket = WebSocketsServer(81);
 
@@ -57,7 +62,9 @@ String Send_GNSS_Info_HTML();
 String Send_Device_Files_HTML();
 
 // Web Script functions
-String Client_WebSocketJS();
+String Survey_Client_WebSocketJS();
+String Files_Client_WebSocketJS();
+void update_listed_files_WebSocket(const char *dirName);
 
 // CSS functions
 String WebsiteBaseCSS();
@@ -81,6 +88,7 @@ void newRAWX(UBX_RXM_RAWX_data_t *ubxDataStruct);
 // Web Communication json vars
 StaticJsonDocument<400> json_doc_tx;
 StaticJsonDocument<400> json_doc_rx;
+
 
 void setup() {
   Serial.begin(115200);
@@ -376,10 +384,13 @@ String Send_Start_Survey_HTML() {
   page += "<p style=\"text-align: center;\">Altitude : <span id='altitude'> altitude value </span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude above MSL : <span id='altitude_msl'> MSL Altitude Val</p>\n";
   page += "<h5 id='mean_sea_lvl' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<div style='text-align: center; margin-top: 15px;'>\n";
+  page += " <button type='button' id='save_survey_btn' style='display: none;'>Save Survey</button>\n";
+  page += "</div>\n";
   page += "<button type='button' id='BTN_SEND_BACK' disabled> Send info to esp32 </button>\n";
   page += "<button type='button' id='start_survey' disabled> Start Survey </button>\n";
   page += "<button type='button' id='stop_survey' disabled> Stop Survey </button>\n";
-  page += Client_WebSocketJS(); // returns string that is valid HTML
+  page += Survey_Client_WebSocketJS(); // returns string that is valid HTML
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
   page += "</body>\n";
   page += "</html>\n";
@@ -478,15 +489,22 @@ String Send_Device_Files_HTML() {
   page += "<h3 style=\"text-align: center;\"> Device Files </h3>\n";
   page += "<h4 style=\"text-align: center;\">Folders on GNSS Reciever:</h4>\n";
   page += listFiles_HTML("/");
+  page += "<div id='file_btn_controls' style='text-align: center; display: none;'>\n";
+  page += " <label for='new_file_name_input'>New File Name:</label>\n";
+  page += " <input type='text' id='new_file_name_input' name='new_file_name_input'></input>\n";
+  page += " <button type='button' id='create_file_btn' disabled>Create File</button>\n";
+  page += " <button type='button' id='delete_file_btn' disabled>Delete File</button>\n";
+  page += "</div>\n";
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
   page += "</body>\n";
+  page += Files_Client_WebSocketJS();
   page += "</html>\n";
 
   return page;
 }
 
 // Web scripts
-String Client_WebSocketJS() {
+String Survey_Client_WebSocketJS() {
   String script = "<script>\n";
   script += "var Socket;\n";
   script += "document.getElementById('BTN_SEND_BACK').addEventListener('click', button_send_back);\n";
@@ -508,8 +526,14 @@ String Client_WebSocketJS() {
   script += "}\n";
   script += "document.getElementById('set_target_accuracy').addEventListener('click', set_target_accuracy);\n";
   script += "function set_target_accuracy() {\n";
-  script += " var target_accuracy_input = document.getElementById('target_accuracy_input')\n";
+  script += " var target_accuracy_input = document.getElementById('target_accuracy_input');\n";
   script += " var message = {set_target_accuracy: target_accuracy_input.value};\n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += "}\n";
+  script += "document.getElementById('save_survey_btn').addEventListener('click', save_survey);\n";
+  script += "function save_survey() {\n";
+  script += " alert('Saving Survey to SD Storage.');\n"; // Left off here working on saving survey to SD functionality
+  script += " var message = {save: 'survey'};\n";
   script += " Socket.send(JSON.stringify(message));\n";
   script += "}\n";
   script += "\n";
@@ -557,12 +581,20 @@ String Client_WebSocketJS() {
   script += "       document.getElementById('target_accuracy_input').style.display = 'none';\n";
   script += "       document.getElementById('set_target_accuracy').style.display = 'none';\n";
   script += "       document.getElementById('accuracy_input_label').style.display = 'none';\n";
+  script += "       document.getElementById('save_survey_btn').style.display = 'none';\n";
   script += "       break;\n";
   script += "     case 'survey_start_failed':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Start Failed.';\n";
   script += "       break;\n";
   script += "     case 'stopped':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Stopped';\n";
+  script += "       document.getElementById('target_accuracy_input').style.display = 'block';\n";
+  script += "       document.getElementById('set_target_accuracy').style.display = 'block';\n";
+  script += "       document.getElementById('accuracy_input_label').style.display = 'block';\n";
+  script += "       break;\n";
+  script += "     case 'finished':\n";
+  script += "       document.getElementById('survey_status').innerHTML = 'Survey Finished';\n";
+  script += "       document.getElementById('save_survey_btn').style.display = 'block';\n";
   script += "       document.getElementById('target_accuracy_input').style.display = 'block';\n";
   script += "       document.getElementById('set_target_accuracy').style.display = 'block';\n";
   script += "       document.getElementById('accuracy_input_label').style.display = 'block';\n";
@@ -632,6 +664,76 @@ String Client_WebSocketJS() {
   script += "   survey_pos_accuracy_el.style.display = 'none';\n";
   script += "   survey_vert_accuracy_el.style.display = 'none';\n";
   script += "   survey_horz_accuracy_el.style.display = 'none';\n";
+  script += " }\n";
+  script += " if (obj.alert) {\n";
+  script += "   if(obj.update_status == 'target_accuracy_updated') {\n";
+  script += "     alert(obj.alert);\n"; // hide input element after this statement
+  script += "     var target_accuracy_in_el = document.getElementById('target_accuracy_input');\n";
+  script += "     var accuracy_in_label_el = document.getElementById('accuracy_input_label');\n";
+  script += "     var accuracy_in_btn_el = document.getElementById('set_target_accuracy');\n";
+  script += "     var target_accuracy_label_el = docmentGetElementById('survey_desired_accuracy');\n";
+  script += "     target_accuracy_in_el.style.display = 'none';\n";
+  script += "     accuracy_in_label_el.style.display = 'none';\n";
+  script += "     accuracy_in_btn_el.style.display = 'none';\n";
+  script += "     target_accuracy_label_el.textContent = 'Target Accuracy:' + obj.updated_target_acc_val\n";
+  script += "   }\n";
+  script += " }\n";
+  script += "}\n";
+  script += "window.onload = function(event) {\n";
+  script += " init();\n";
+  script += "}\n";
+  script += "</script>\n";
+  return script;
+}
+
+String Files_Client_WebSocketJS() {
+  String script = "<script>\n";
+  script += "var Socket;\n";
+  script += "document.getElementById('create_file_btn').addEventListener('click', create_file);\n";
+  script += "function create_file() {\n";
+  script += " var new_file_name = document.getElementById('new_file_name_input').value;\n";
+  script += " var message = {create_file: new_file_name}; \n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += " console.log('creating new file ' + new_file_name);\n";
+  script += " document.getElementById('new_file_name_input').value = '';\n"; // reset input field  will also reset buttons file buttons bc file_name length is less than one.
+  script += "}\n";
+  script += "document.getElementById('delete_file_btn').addEventListener('click', remove_file);\n";
+  script += "function remove_file() {\n";
+  script += " var new_file_name = document.getElementById('new_file_name_input').value;\n";
+  script += " var message = {remove_file: new_file_name}; \n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += " console.log('removing file ' + new_file_name);\n";
+  script += " document.getElementById('new_file_name_input').value = '';\n"; // reset input field  will also reset buttons file buttons bc file_name length is less than one.
+  script += "}\n";
+  script += "document.getElementById('new_file_name_input').addEventListener('input', check_filename_input);\n";
+  script += "function check_filename_input() {\n";
+  script += " var input_el = document.getElementById('new_file_name_input');\n";
+  script += " var input_val = input_el.value;\n";
+  script += " if(input_val.length > 1) {\n";
+  script += " document.getElementById('create_file_btn').disabled = false;\n";
+  script += " document.getElementById('delete_file_btn').disabled = false;\n";
+  script += " } else {\n";
+  script += " document.getElementById('delete_file_btn').disabled = true;\n";
+  script += " document.getElementById('create_file_btn').disabled = true;\n";
+  script += " }\n";
+  script += "}\n";
+  script += "function init() {\n";
+  script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
+  script += " Socket.addEventListener('open', (event) => {\n";
+  script += " console.log('websocket client opened.');\n";
+  script += " document.getElementById('file_btn_controls').style.display = 'block';\n";
+  script += " });\n";
+  script += " Socket.addEventListener('close', (event) => {\n";
+  script += " console.log('websocket client closed.');\n";
+  script += " });\n";
+  script += " Socket.onmessage = function(event) { //callback func\n";
+  script += " processCommand(event);\n";
+  script += " };\n";
+  script += "}\n";
+  script += "function processCommand(event) {\n"; // update elements with data
+  script += " var obj = JSON.parse(event.data)\n";
+  script += " if(obj.update_view) {\n";
+  script += " console.log(obj.files);\n"; // testing, for now print json from websocket. handling updating the file list view here.
   script += " }\n";
   script += "}\n";
   script += "window.onload = function(event) {\n";
@@ -740,6 +842,31 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
         float new_accuracy_val = json_doc_rx["set_target_accuracy"];
         Serial.println(new_accuracy_val);
         survey_desired_accuracy = new_accuracy_val;
+
+        String JsonString = "";
+        JsonObject object = json_doc_tx.to<JsonObject>();
+
+        object["alert"] = "target accuracy set to new value: " + (String)survey_desired_accuracy;
+        object["update_status"] = "target_accuracy_updated";
+        object["updated_target_acc_val"] = (String)survey_desired_accuracy;
+        serializeJson(object,JsonString);
+        webSocket.broadcastTXT(JsonString);
+      }
+
+      if(json_doc_rx["save"]) {
+        if(json_doc_rx["save"] == "survey") {
+          save_survey_observation();
+        }
+      }
+
+      if(json_doc_rx["create_file"]) {
+        create_file(json_doc_rx["create_file"]);
+        update_listed_files_WebSocket("/"); // load root directory but update this to a variable possibly called working_directory
+      }
+
+      if(json_doc_rx["remove_file"]) {
+        delete_file(json_doc_rx["remove_file"]);
+        update_listed_files_WebSocket("/");
       }
     }
     break;
@@ -780,7 +907,7 @@ String listFiles_HTML(const char *dirName) {
 
   while (File entry = root.openNextFile()) {
     Serial.println(entry.name());
-    directory_files += "<p style=\"text-align: center;\">";
+    directory_files += "<p class='file_list_item' style=\"text-align: center;\">"; // use the class name to handle updating files view
     directory_files += entry.name();
     directory_files += "</p>\n";
     entry.close();
@@ -788,6 +915,62 @@ String listFiles_HTML(const char *dirName) {
 
   root.close();
   return directory_files;
+}
+
+// update the listed files for front end view
+void update_listed_files_WebSocket(const char *dirName) {
+  File root = SD.open(dirName);
+  String directory_files = "";
+
+  String jsonString = "";
+  JsonObject object = json_doc_tx.to<JsonObject>();
+
+  if(!root) {
+    Serial.println("Failed to open directory");
+    display_info("Attempted to open file directory but failed.");
+  }
+
+  Serial.println("Files in root directory:");
+  display_info("Displaying Files on Device in Web browser.");
+
+  object["update_view"] = "file_list"; // build client side functionality to update the file list view.
+  JsonArray files = object.createNestedArray("files");
+  while (File entry = root.openNextFile()) {
+    files.add((String)entry.name());
+    entry.close();
+  }
+
+  serializeJson(object, jsonString);
+  webSocket.broadcastTXT(jsonString);
+  root.close();
+}
+
+void create_file(String file_name) {
+  // check if file exist
+  if(SD.exists("/" + file_name)) {
+    Serial.println("Attempted to create new file " + file_name + "but file already exist");
+  }
+  else {
+    // Create file
+    File new_file = SD.open("/" + file_name, FILE_WRITE);
+    new_file.close();
+    Serial.println("Created new File " + file_name);
+  }
+}
+
+void delete_file(String file_name) {
+    if(SD.exists("/" + file_name)) {
+      // Delete File
+      Serial.println("Deleting File " + file_name);
+      SD.remove("/" + file_name);
+    } else {
+      Serial.println("Attempted to remove file " + file_name + " but file does not exist.");
+    }
+}
+
+void save_survey_observation() {
+  Serial.println("Saving Survey Observation");
+  display_info("Saving Survey Observation");
 }
 
 // Surveying Functions
@@ -909,8 +1092,8 @@ void stop_survey_observation() {
     bool response = HAM_GNSS.disableSurveyMode(); // disable survey mode.
     if(response) {
       display_info("Survey Observation Stopped.");
-      object["survey_status"] = "stopped";
-      object["survey_msg"] = "Survey Manually stopped";
+      object["survey_status"] = "finished";
+      object["survey_msg"] = "Survey Successfully Finished";
       serializeJson(object, jsonString);
       webSocket.broadcastTXT(jsonString);
       survey_in_progress = false;
