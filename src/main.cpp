@@ -30,14 +30,21 @@ void display_info_lg(String message);
 // SD Card Setup
 void listFiles(const char *dirName);
 String listFiles_HTML(const char *dirName);
+bool is_directory(const char *dirName);
+bool isFileTxt(String fileName);
 
 const char* ssid = "HAM_GNSS";
 const char* password = "pass1234";
 
 // SD functions
-void save_survey_observation();
+void save_survey_observation(String gcp_index);
 void create_file(String file_name);
 void delete_file(String file_name);
+void write_to_file(String new_file_content);
+
+//Data Logging variables
+String  working_directory = "/test_survey03.txt";
+String  file_view_directory = "/";
 
 WebServer server(80); // Create server on port 80
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -64,7 +71,8 @@ String Send_Device_Files_HTML();
 // Web Script functions
 String Survey_Client_WebSocketJS();
 String Files_Client_WebSocketJS();
-void update_listed_files_WebSocket(const char *dirName);
+void update_listed_files_WebSocket(const String dirName);
+void show_file_contents(const String dirName);
 
 // CSS functions
 String WebsiteBaseCSS();
@@ -208,7 +216,15 @@ void setup() {
   }
   else {
     Serial.println("SD Card initialized :)");
-    listFiles("/");
+    //listFiles("/");
+    // testing sd writing
+    // File write_to_File = SD.open(working_directory,FILE_WRITE);
+    // if(write_to_File) {
+    //   write_to_File.println("Hello");
+    //   write_to_File.close();
+    // } else {
+    //   Serial.println("Working directory save file does not exist.");
+    // }
   }
 }
 
@@ -386,6 +402,8 @@ String Send_Start_Survey_HTML() {
   page += "<h5 id='mean_sea_lvl' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
   page += "<div style='text-align: center; margin-top: 15px;'>\n";
   page += " <button type='button' id='save_survey_btn' style='display: none;'>Save Survey</button>\n";
+  page += " <label id='gcp_index_label' for='gcp_index_input'>GCP Index:</label>\n";
+  page += " <input type='number' id='gcp_index_input' name='gcp_index_input' min='1' max='100'>\n";
   page += "</div>\n";
   page += "<button type='button' id='BTN_SEND_BACK' disabled> Send info to esp32 </button>\n";
   page += "<button type='button' id='start_survey' disabled> Start Survey </button>\n";
@@ -488,14 +506,20 @@ String Send_Device_Files_HTML() {
   page += "<h1 style=\"text-align: center; font-weight: bold\">High Altitude Media GNSS Reciver</h1>\n";
   page += "<h3 style=\"text-align: center;\"> Device Files </h3>\n";
   page += "<h4 style=\"text-align: center;\">Folders on GNSS Reciever:</h4>\n";
+  page += "<h5 style='text-align: center;'>current directory: <span id='current_directory'>";
+  page += file_view_directory;
+  page += "</span></h5>\n";
   page += "<div id='file_list_view'>\n";
   page += listFiles_HTML("/");
   page += "</div>\n";
-  page += "<div id='file_btn_controls' style='text-align: center; display: none;'>\n";
+  page += "<div id='file_btn_controls' style='text-align: center; display: none; margin-top: 2em;'>\n";
   page += " <label for='new_file_name_input'>New File Name:</label>\n";
   page += " <input type='text' id='new_file_name_input' name='new_file_name_input'></input>\n";
   page += " <button type='button' id='create_file_btn' disabled>Create File</button>\n";
   page += " <button type='button' id='delete_file_btn' disabled>Delete File</button>\n";
+  page += "</div>\n";
+  page += "<div id='directory_nav_controls'>\n";
+  page += "<button id='nav_previous_directory'>Navigate to parent folder</button>";
   page += "</div>\n";
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
   page += "</body>\n";
@@ -535,7 +559,8 @@ String Survey_Client_WebSocketJS() {
   script += "document.getElementById('save_survey_btn').addEventListener('click', save_survey);\n";
   script += "function save_survey() {\n";
   script += " alert('Saving Survey to SD Storage.');\n"; // Left off here working on saving survey to SD functionality
-  script += " var message = {save: 'survey'};\n";
+  script += " current_gcp_index = document.getElementById('gcp_index_input').value;\n";
+  script += " var message = {save: 'survey', gcp_index: current_gcp_index};\n";
   script += " Socket.send(JSON.stringify(message));\n";
   script += "}\n";
   script += "\n";
@@ -584,6 +609,8 @@ String Survey_Client_WebSocketJS() {
   script += "       document.getElementById('set_target_accuracy').style.display = 'none';\n";
   script += "       document.getElementById('accuracy_input_label').style.display = 'none';\n";
   script += "       document.getElementById('save_survey_btn').style.display = 'none';\n";
+  script += "       document.getElementById('gcp_index_input').style.display = 'none';\n";
+  script += "       document.getElementById('gcp_index_label').style.display = 'none';\n";
   script += "       break;\n";
   script += "     case 'survey_start_failed':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Start Failed.';\n";
@@ -597,6 +624,8 @@ String Survey_Client_WebSocketJS() {
   script += "     case 'finished':\n";
   script += "       document.getElementById('survey_status').innerHTML = 'Survey Finished';\n";
   script += "       document.getElementById('save_survey_btn').style.display = 'block';\n";
+  script += "       document.getElementById('gcp_index_input').style.display = 'block';\n";
+  script += "       document.getElementById('gcp_index_label').style.display = 'none';\n";
   script += "       document.getElementById('target_accuracy_input').style.display = 'block';\n";
   script += "       document.getElementById('set_target_accuracy').style.display = 'block';\n";
   script += "       document.getElementById('accuracy_input_label').style.display = 'block';\n";
@@ -719,14 +748,41 @@ String Files_Client_WebSocketJS() {
   script += " document.getElementById('create_file_btn').disabled = true;\n";
   script += " }\n";
   script += "}\n";
+  script += "function open_directory(element) {\n";
+  script += " console.log('opening directory :' + element.getAttribute('device_file_path'));\n";
+  script += " var message = {open_dir: element.getAttribute('device_file_path')}; \n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += " document.getElementById('current_directory').innerHTML = element.getAttribute('device_file_path');";
+  script += "}\n";
+  script += "document.getElementById('nav_previous_directory').addEventListener('click', open_previous_directory);\n";
+  script += "function open_previous_directory() {\n";
+  script += " var current_dir = document.getElementById('current_directory').innerHTML.toString();\n";
+  script += " var modified_path = current_dir.replace(/\\/[^\\/]*$/,'/');\n"; // regex expresion to remove the end directory from string and return remaing string
+  script += " var message = {open_dir: modified_path}; \n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += " console.log(current_dir + 'previous dir' + modified_path);\n";
+  script += " }\n";
+  script += "function open_file_contents(element) {\n";
+  script += " console.log('opening file contents for ' + element.getAttribute('device_file_path'));\n";
+  script += " var message = {update_view: 'show_file_content', file_directory: element.getAttribute('device_file_path')}\n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += "}\n";
   script += "function init() {\n";
   script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
   script += " Socket.addEventListener('open', (event) => {\n";
   script += " console.log('websocket client opened.');\n";
   script += " document.getElementById('file_btn_controls').style.display = 'block';\n";
+  script += " var dir_elements = document.getElementsByClassName('folder_btn')\n";
+  script += " for (var i = 0; i < dir_elements.length; i++) {\n";
+  script += "   dir_elements[i].disabled = false;\n";
+  script += " }\n";
   script += " });\n";
   script += " Socket.addEventListener('close', (event) => {\n";
-  script += " console.log('websocket client closed.');\n";
+  script += "   console.log('websocket client closed.');\n";
+  script += "   var dir_elements = document.getElementsByClassName('folder_btn')\n";
+  script += "   for (var i = 0; i < dir_elements.length; i++) {\n";
+  script += "     dir_elements[i].disabled = true;\n";
+  script += "   }\n";
   script += " });\n";
   script += " Socket.onmessage = function(event) { //callback func\n";
   script += " processCommand(event);\n";
@@ -738,14 +794,56 @@ String Files_Client_WebSocketJS() {
   script += "   var parentElement = document.getElementById('file_list_view');\n";
   script += "   var old_file_list_elements = document.getElementsByClassName('file_list_item');\n";
   script += "   console.log(obj.files);\n"; // testing, for now print json from websocket. handling updating the file list view here.
+  script += "   console.log(obj.directories);\n";
   script += "   parentElement.innerHTML = '';\n"; // testing, remove later
-  script += "   obj.files.forEach( function(file){\n";
+  script += "   document.getElementById('current_directory').innerHTML = obj.file_view_directory;\n";
+  script += "   obj.directories.forEach( function(directory){\n";
+  script += "     var file_item_container = document.createElement('div');\n";
+  script += "     var file_element = document.createElement('p');\n";
+  script += "     var file_btn_element = document.createElement('button')\n";
+  script += "     file_btn_element.innerHTML = 'Open '+ directory;\n";
+  script += "     file_btn_element.setAttribute('device_file_path', '/' + directory);\n";
+  script += "     file_btn_element.setAttribute('onclick', 'open_directory(this)');\n";
+  script += "     file_btn_element.classList.add('folder_btn');\n";
+  script += "     file_element.classList.add('file_list_item');\n";
+  script += "     file_element.textContent = directory;\n";
+  script += "     file_item_container.style.textAlign = 'center';\n";
+  script += "     file_item_container.appendChild(file_element);\n";
+  script += "     file_item_container.appendChild(file_btn_element);\n";
+  script += "     parentElement.appendChild(file_item_container);\n";
+  script += "   });\n";
+  script += "   if(obj.files) {\n";
+  script += "     obj.files.forEach( function(file) {\n";
+  script += "     var file_item_container = document.createElement('div');\n";
   script += "     var file_element = document.createElement('p');\n";
   script += "     file_element.classList.add('file_list_item');\n";
   script += "     file_element.textContent = file;\n";
-  script += "     file_element.style.textAlign = 'center';\n";
-  script += "     parentElement.appendChild(file_element);\n";
-  script += "   });\n";
+  script += "     file_item_container.style.textAlign = 'center';\n";
+  script += "     file_item_container.appendChild(file_element);\n";
+  script += "     var file_name = String(file);\n";
+  script += "     if (file_name.endsWith('.txt')) {\n"; // check for text files
+  script += "       var view_content_btn = document.createElement('button');\n";
+  script += "       view_content_btn.classList.add('view_content_btn');\n";
+  script += "       view_content_btn.setAttribute('device_file_path', obj.file_view_directory + '/' + file);\n";
+  script += "       view_content_btn.setAttribute('onclick', 'open_file_contents(this)');\n"; // create this function
+  script += "       view_content_btn.innerHTML = 'View ' + file + ' Contents';\n";
+  script += "       file_item_container.appendChild(view_content_btn);\n";
+  script += "     }\n";
+  script += "     parentElement.appendChild(file_item_container);\n";
+  script += "    });\n";
+  script += "   }\n";
+  script += " }\n";
+  script += " if (obj.update_view == 'show_file_content') {\n";
+  script += "   var parentElement = document.getElementById('file_list_view');\n";
+  script += "   parentElement.innerHTML = '';\n";
+  script += "   var file_content_el = document.createElement('h4');\n";
+  script += "   file_content_el.textContent = obj.file_content\n";
+  script += "   file_content_el.style.textAlign = 'center';\n";
+  script += "   parentElement.appendChild(file_content_el);\n";
+  script += " }\n";
+  script += " if(obj.file_view_directory) {\n";
+  script += "  document.getElementById('current_directory').innerHTML = obj.file_view_directory;\n";
+  script += "  console.log(obj);\n";
   script += " }\n";
   script += "}\n";
   script += "window.onload = function(event) {\n";
@@ -867,18 +965,28 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
 
       if(json_doc_rx["save"]) {
         if(json_doc_rx["save"] == "survey") {
-          save_survey_observation();
+          save_survey_observation(json_doc_rx["gcp_index"].as<String>());
         }
       }
 
       if(json_doc_rx["create_file"]) {
         create_file(json_doc_rx["create_file"]);
-        update_listed_files_WebSocket("/"); // load root directory but update this to a variable possibly called working_directory
+        update_listed_files_WebSocket(file_view_directory); // load root directory but update this to a variable possibly called working_directory
       }
 
       if(json_doc_rx["remove_file"]) {
         delete_file(json_doc_rx["remove_file"]);
-        update_listed_files_WebSocket("/");
+        update_listed_files_WebSocket(file_view_directory);
+      }
+
+      if(json_doc_rx["open_dir"]) {
+        // update UI
+        file_view_directory = json_doc_rx["open_dir"].as<String>();
+        update_listed_files_WebSocket(file_view_directory);
+      }
+
+      if(json_doc_rx["update_view"] == "show_file_content") {
+        show_file_contents(json_doc_rx["file_directory"].as<String>());
       }
     }
     break;
@@ -918,10 +1026,34 @@ String listFiles_HTML(const char *dirName) {
 
 
   while (File entry = root.openNextFile()) {
-    Serial.println(entry.name());
-    directory_files += "<p class='file_list_item' style=\"text-align: center;\">"; // use the class name to handle updating files view
-    directory_files += entry.name();
-    directory_files += "</p>\n";
+    if (is_directory(entry.name())) { // only list dir if file is a dir
+      Serial.println(entry.name());
+      directory_files += "<div id='file_item_container' style=\"text-align: center;\">\n";
+      directory_files += "<p class='file_list_item'>"; // use the class name to handle updating files view
+      directory_files += entry.name();
+      directory_files += "</p>\n";
+      directory_files += "<button class='folder_btn' onclick='open_directory(this)' device_file_path='/";
+      directory_files += entry.name();
+      directory_files += "' disabled>Open ";
+      directory_files += entry.name();
+      directory_files += "</button>\n";
+      directory_files += "</div>\n";
+
+    }
+    else {
+      directory_files += "<div id='file_item_container' style=\"text-align: center;\">\n";
+      directory_files += "<p class='file_list_item'>"; // use the class name to handle updating files view
+      directory_files += entry.name();
+      directory_files += "</p>\n";
+      if(isFileTxt(entry.name())) { // check for txt file name
+        directory_files += "<button class='view_content_btn' device_file_path='/";
+        directory_files += entry.name();
+        directory_files += "' onclick='open_file_contents(this)'> View ";
+        directory_files += entry.name();
+        directory_files += " Contents</button>\n";
+      }
+      directory_files += "</div>\n";
+    }
     entry.close();
   }
 
@@ -929,8 +1061,32 @@ String listFiles_HTML(const char *dirName) {
   return directory_files;
 }
 
+bool isFileTxt(String fileName) {
+  // Get the position of the last dot in the file name
+  int dotIndex = fileName.lastIndexOf('.');
+
+  // Check if the dot is found and the file extension is ".txt"
+  if(dotIndex != -1 && fileName.substring(dotIndex) == ".txt") {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool is_directory(const char *dirName) {
+  int i;
+
+  for (i = 0; dirName[i] != '\0'; i++) { // parse string until we reach null char
+    if (dirName[i] == '.') { // check for period in file name
+      return false;
+    }
+  }
+
+  return true; // file is a dir
+}
+
 // update the listed files for front end view
-void update_listed_files_WebSocket(const char *dirName) {
+void update_listed_files_WebSocket(const String dirName) {
   File root = SD.open(dirName);
   String directory_files = "";
 
@@ -945,16 +1101,50 @@ void update_listed_files_WebSocket(const char *dirName) {
   Serial.println("Files in root directory:");
   display_info("Displaying Files on Device in Web browser.");
 
+  object["file_view_directory"] = file_view_directory;
   object["update_view"] = "file_list"; // build client side functionality to update the file list view.
-  JsonArray files = object.createNestedArray("files");
+  JsonArray dirs_array = object.createNestedArray("directories");
+  JsonArray files_array = object.createNestedArray("files");
   while (File entry = root.openNextFile()) {
-    files.add((String)entry.name());
+    if(is_directory(entry.name())) { // check for dir
+      dirs_array.add((String)entry.name());
+      
+    } else {
+      files_array.add((String)entry.name());
+    }
     entry.close();
   }
 
   serializeJson(object, jsonString);
   webSocket.broadcastTXT(jsonString);
   root.close();
+}
+
+void show_file_contents(const String dirName) {
+  String jsonString = "";
+  JsonObject object = json_doc_tx.to<JsonObject>();
+
+  File file_to_open = SD.open(dirName);
+  if(file_to_open) {
+    display_info("Displaying ");
+    display_add_info(dirName);
+    display_add_info("  file contents on web dash.");
+
+    String file_content = "";
+    while(file_to_open.available()) {
+      unsigned char file_byte = file_to_open.read();
+      file_content += (char)file_byte; // convert byte to ASCII char
+    }
+
+    Serial.println("file content: " + file_content);
+
+    object["update_view"] = "show_file_content";
+    object["file_content"] =  file_content;
+    serializeJson(object, jsonString);
+    webSocket.broadcastTXT(jsonString);
+
+    file_to_open.close();
+  }
 }
 
 void create_file(String file_name) {
@@ -980,9 +1170,45 @@ void delete_file(String file_name) {
     }
 }
 
-void save_survey_observation() {
+void write_to_file(String new_file_content) {
+  File write_to_file = SD.open(working_directory, FILE_READ);
+  if(write_to_file) {
+    Serial.println("Reading file contents.");
+    // read file
+    String file_content = "";
+    while(write_to_file.available()) {
+      unsigned char file_byte = write_to_file.read();
+      file_content += (char)file_byte; // convert byte to ASCII char
+      Serial.println("File Content: " + file_content);
+    }
+    write_to_file.close();
+    // append file content to new content
+    file_content += new_file_content;
+    write_to_file = SD.open(working_directory, FILE_WRITE);
+    write_to_file.print(file_content);
+    write_to_file.close();
+    Serial.println("Successfully wrote to file.");
+    // send websocket status msg
+  } else {
+    display_info("Failed to open survey observation save file.");
+    Serial.println("Failed to open survey obervation save file");
+    // send websocket status msg
+  }
+}
+
+void save_survey_observation(String gcp_index) {
   Serial.println("Saving Survey Observation");
   display_info("Saving Survey Observation");
+
+  String GCP_name = "GCP" + gcp_index;
+  String longitude = (String)HAM_GNSS.getHighResLongitude();
+  String latitude = (String)HAM_GNSS.getHighResLatitude();
+  String elevation = (String)HAM_GNSS.getAltitude();
+  Serial.println("Writing survey observation to file.");
+
+  String file_content = GCP_name + " " + longitude + " " + latitude + " " + elevation + "\n";
+
+  write_to_file(file_content);
 }
 
 // Surveying Functions
