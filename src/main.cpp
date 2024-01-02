@@ -41,10 +41,12 @@ void save_survey_observation(String gcp_index);
 void create_file(String file_name);
 void delete_file(String file_name);
 void write_to_file(String new_file_content);
+void set_save_file(String file_dir);
 
 //Data Logging variables
-String  working_directory = "/test_survey03.txt";
+String  working_directory = "/test_survey04.txt";
 String  file_view_directory = "/";
+String datum = "WSG : 84\n"; // might want to turn this into an enum also planning to use the NAD83 datum
 
 WebServer server(80); // Create server on port 80
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -189,7 +191,6 @@ void setup() {
   if(ok) ok = HAM_GNSS.addCfgValset8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1094_I2C, 1);
   if(ok) ok = HAM_GNSS.addCfgValset8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1124_I2C, 1);
   if(ok) ok = HAM_GNSS.addCfgValset8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1230_I2C, 10); // enable message 1230 every 10 seconds
-
   if (ok) ok = HAM_GNSS.setDynamicSPARTNKeys(16,2294, 0, "d8f33f27fc2afd1db1624d5a45817d71", 16, 2297, 0, "9a5899dc0b6313245219d303f281db77"); // add encryption keys to decript NEO-DS9 messages.
   
 
@@ -400,6 +401,13 @@ String Send_Start_Survey_HTML() {
   page += "<p style=\"text-align: center;\">Altitude : <span id='altitude'> altitude value </span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude above MSL : <span id='altitude_msl'> MSL Altitude Val</p>\n";
   page += "<h5 id='mean_sea_lvl' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<div id='reciever_info' style='text-align:center display: none;'>\n"; // create js functionality to show div
+  page += " <h4 id='SIV_status'></h4>\n"; // create js functionality to update values
+  page += " <h4 id='fix_type'></h4>\n";
+  page += " <h4 id='RTK'></h4>\n";
+  page += " <h4 id='heading'></h4>\n";
+  page += " <h4 id='PDOP'></h4>\n";
+  page += "</div>\n";
   page += "<div style='text-align: center; margin-top: 15px;'>\n";
   page += " <button type='button' id='save_survey_btn' style='display: none;'>Save Survey</button>\n";
   page += " <label id='gcp_index_label' for='gcp_index_input'>GCP Index:</label>\n";
@@ -410,6 +418,7 @@ String Send_Start_Survey_HTML() {
   page += "<button type='button' id='stop_survey' disabled> Stop Survey </button>\n";
   page += Survey_Client_WebSocketJS(); // returns string that is valid HTML
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
+  page += "<button id='reconnect_web_socket' onclick='reconnect_web_socket()' style='display:none;'>Reconnect WebSocket</button>\n";
   page += "</body>\n";
   page += "</html>\n";
 
@@ -522,6 +531,7 @@ String Send_Device_Files_HTML() {
   page += "<button id='nav_previous_directory'>Navigate to parent folder</button>";
   page += "</div>\n";
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
+  page += "<button id='reconnect_web_socket' onclick='reconnect_web_socket()' style='display:none;'>Reconnect WebSocket</button>\n";
   page += "</body>\n";
   page += Files_Client_WebSocketJS();
   page += "</html>\n";
@@ -564,6 +574,11 @@ String Survey_Client_WebSocketJS() {
   script += " Socket.send(JSON.stringify(message));\n";
   script += "}\n";
   script += "\n";
+  script += "document.getElementById('reconnect_web_socket').addEventListener('click', reconnect_web_socket);\n";
+  script += "function reconnect_web_socket() {\n";
+  script += " init();\n";
+  script += " alert('Reconnecting WebSocket');\n";
+  script += "}\n";
   script += "function init() {\n";
   script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
   script += " Socket.addEventListener('open', (event) => {\n";
@@ -573,6 +588,7 @@ String Survey_Client_WebSocketJS() {
   script += "   sendMsg_btn.disabled = false;\n";
   script += "   start_survey_btn.disabled = false;\n";
   script += "   stop_survey_btn.disabled = false;\n";
+  script += "   document.getElementById('reconnect_web_socket').style.display = 'none';\n";
   script += " });\n";
   script += " Socket.addEventListener('close', (event) => {\n";
   script += "   var sendMsg_btn = document.getElementById('BTN_SEND_BACK');\n";
@@ -581,6 +597,7 @@ String Survey_Client_WebSocketJS() {
   script += "   sendMsg_btn.disabled = true;\n";
   script += "   start_survey_btn.disabled = true;\n";
   script += "   stop_survey_btn.disabled = true;\n";
+  script += "   document.getElementById('reconnect_web_socket').style.display = 'block';\n";
   script += " });\n";
   script += " Socket.onmessage = function(event) { //callback func\n";
   script += " processCommand(event);\n";
@@ -709,6 +726,23 @@ String Survey_Client_WebSocketJS() {
   script += "     target_accuracy_label_el.textContent = 'Target Accuracy:' + obj.updated_target_acc_val\n";
   script += "   }\n";
   script += " }\n";
+  script += "if (obj.SIV && obj.fix_type && obj.RTK && obj.heading && obj.PDOP) {\n"; // dont forget to display div
+  script += " var reciever_info_el = document.getElementById('reciever_info');\n";
+  script += " reciever_info_el.style.display = 'block';\n";
+  script += " var SIV_el = document.getElementById('SIV_status');\n";
+  script += " var fix_type_el = document.getElementById('fix_type');\n";
+  script += " var RTK_el = document.getElementById('RTK');\n";
+  script += " var heading_el = document.getElementById('heading');\n";
+  script += " var PDOP_el = document.getElementById('PDOP');\n";
+  script += " SIV_el.textContent = 'SIV: ' + obj.SIV;\n";
+  script += " fix_type_el.textContent = 'Fix Type: ' + obj.fix_type;\n";
+  script += " RTK_el.textContent = 'RTK: ' + obj.RTK;\n";
+  script += " heading_el.textContent = 'Heading: ' + obj.heading;\n";
+  script += " PDOP_el.textContent = 'PDOP: ' + obj.PDOP;\n";
+  script += " } else {\n";
+  script += "   var reciever_info_el = document.getElementById('reciever_info');\n";
+  script += "   reciever_info_el.style.display = 'block';\n";
+  script += " }";
   script += "}\n";
   script += "window.onload = function(event) {\n";
   script += " init();\n";
@@ -767,11 +801,21 @@ String Files_Client_WebSocketJS() {
   script += " var message = {update_view: 'show_file_content', file_directory: element.getAttribute('device_file_path')}\n";
   script += " Socket.send(JSON.stringify(message));\n";
   script += "}\n";
+  script += "function set_save_file(element) {\n";
+  script += " var message = {set_save_file: element.getAttribute('device_file_path')}\n";
+  script += " Socket.send(JSON.stringify(message));\n";
+  script += "}\n";
+  script += "document.getElementById('reconnect_web_socket').addEventListener('click', reconnect_web_socket);\n";
+  script += "function reconnect_web_socket() {\n";
+  script += " init();\n";
+  script += " alert('Reconnecting WebSocket');\n";
+  script += "}\n";
   script += "function init() {\n";
   script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
   script += " Socket.addEventListener('open', (event) => {\n";
   script += " console.log('websocket client opened.');\n";
   script += " document.getElementById('file_btn_controls').style.display = 'block';\n";
+  script += " document.getElementById('reconnect_web_socket').style.display = 'none';\n";
   script += " var dir_elements = document.getElementsByClassName('folder_btn')\n";
   script += " for (var i = 0; i < dir_elements.length; i++) {\n";
   script += "   dir_elements[i].disabled = false;\n";
@@ -779,6 +823,7 @@ String Files_Client_WebSocketJS() {
   script += " });\n";
   script += " Socket.addEventListener('close', (event) => {\n";
   script += "   console.log('websocket client closed.');\n";
+  script += "   document.getElementById('reconnect_web_socket').style.display = 'block';\n";
   script += "   var dir_elements = document.getElementsByClassName('folder_btn')\n";
   script += "   for (var i = 0; i < dir_elements.length; i++) {\n";
   script += "     dir_elements[i].disabled = true;\n";
@@ -828,6 +873,12 @@ String Files_Client_WebSocketJS() {
   script += "       view_content_btn.setAttribute('onclick', 'open_file_contents(this)');\n"; // create this function
   script += "       view_content_btn.innerHTML = 'View ' + file + ' Contents';\n";
   script += "       file_item_container.appendChild(view_content_btn);\n";
+  script += "       var make_save_file_btn = document.createElement('button');\n";
+  script += "       make_save_file_btn.classList.add('set_save_file_btn');\n";
+  script += "       make_save_file_btn.setAttribute('device_file_path', obj.file_view_directory + file);\n";
+  script += "       make_save_file_btn.setAttribute('onclick', 'set_save_file(this)');\n";
+  script += "       make_save_file_btn.innerHTML = 'Make Save File';\n";
+  script += "       file_item_container.appendChild(make_save_file_btn);\n";
   script += "     }\n";
   script += "     parentElement.appendChild(file_item_container);\n";
   script += "    });\n";
@@ -988,6 +1039,16 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
       if(json_doc_rx["update_view"] == "show_file_content") {
         show_file_contents(json_doc_rx["file_directory"].as<String>());
       }
+
+      if(json_doc_rx["set_save_file"]) {
+        set_save_file(json_doc_rx["set_save_file"].as<String>());
+        String JsonString = "";
+        JsonObject object = json_doc_tx.to<JsonObject>();
+
+        object["alert"] = "successfully set save file to " + working_directory;
+        serializeJson(object,JsonString);
+        webSocket.broadcastTXT(JsonString);
+      }
     }
     break;
   }
@@ -1046,11 +1107,14 @@ String listFiles_HTML(const char *dirName) {
       directory_files += entry.name();
       directory_files += "</p>\n";
       if(isFileTxt(entry.name())) { // check for txt file name
-        directory_files += "<button class='view_content_btn' device_file_path='/";
+        directory_files += "<button class='view_content_btn' device_file_path='/"; // view file contents button
         directory_files += entry.name();
         directory_files += "' onclick='open_file_contents(this)'> View ";
         directory_files += entry.name();
         directory_files += " Contents</button>\n";
+        directory_files += "<button class='set_save_file_btn' onclick='set_save_file(this)' device_file_path ='/";
+        directory_files += entry.name();
+        directory_files += "'> Make Save File</button>\n"; // onclick, device file path
       }
       directory_files += "</div>\n";
     }
@@ -1083,6 +1147,11 @@ bool is_directory(const char *dirName) {
   }
 
   return true; // file is a dir
+}
+
+void set_save_file(String file_dir) {
+  working_directory = file_dir;
+  Serial.println("Set save file to " + working_directory);
 }
 
 // update the listed files for front end view
@@ -1196,6 +1265,33 @@ void write_to_file(String new_file_content) {
   }
 }
 
+// Get Working Directory file contents
+String get_file_contents() {
+  String file_contents = "";
+  File file = SD.open(working_directory, FILE_READ);
+  while(file.available()) {
+    unsigned char file_byte = file.read();
+    file_contents  += (char)file_byte;
+  }
+  file.close();
+
+  return file_contents;
+}
+
+void init_survey_file() {
+  // open survey file and set datum type
+  // Check if file has already been intiated
+  if(get_file_contents().indexOf(datum) != -1) {
+    // pattern found
+    Serial.println("Survey File already configured");
+    display_info("Survey File already configured");
+  } else {
+    // configure survey file with datum
+    write_to_file(datum);
+  }
+
+}
+
 void save_survey_observation(String gcp_index) {
   Serial.println("Saving Survey Observation");
   display_info("Saving Survey Observation");
@@ -1207,6 +1303,11 @@ void save_survey_observation(String gcp_index) {
   Serial.println("Writing survey observation to file.");
 
   String file_content = GCP_name + " " + longitude + " " + latitude + " " + elevation + "\n";
+
+  // check if survey file has been initiated
+  if (get_file_contents() == ""){
+    init_survey_file(); // config survey file
+  }
 
   write_to_file(file_content);
 }
@@ -1266,6 +1367,65 @@ void start_survey_observation() {
   }
 }
 
+// Survey data helper functions
+String get_fix_type() {
+  String fixType_str = "";
+  byte fixType = HAM_GNSS.getFixType();
+  if(fixType == 0) fixType_str = "No fix";
+  else if(fixType == 1) fixType_str = "Dead Reckoning";
+  else if(fixType == 2) fixType_str = "2D";
+  else if(fixType == 3) fixType_str = "3D";
+  else if(fixType == 4) fixType_str = "GNSS + Dead Reckoning";
+  else if(fixType == 5) fixType_str = "Time only";
+  return fixType_str;
+}
+
+String get_RTK_status() {
+  String RTK_str = "";
+  byte RTK = HAM_GNSS.getCarrierSolutionType();
+  if(RTK == 0) RTK_str = "No Solution";
+  else if (RTK == 1) RTK_str = "High precision floating fix";
+  else if (RTK == 2) RTK_str = "High precision fix";
+  return RTK_str;
+}
+
+String get_heading() {
+  String heading_str = "";
+  float heading_f = HAM_GNSS.getHeading() * 1e-5;
+
+  if (heading_f < 10.0) {
+    // North
+    heading_str += "N";
+  } else if (heading_f >= 10 && heading_f < 85) {
+    // North East
+    heading_str += "NE";
+  } else if  (heading_f >= 85 && heading_f < 95) {
+    // East
+    heading_str += "E";
+  } else if (heading_f >= 95 && heading_f < 175 ) {
+    // South East
+    heading_str += "SE";
+  } else if  (heading_f >= 175 && heading_f < 185) {
+    // South
+    heading_str += "S";
+  } else if (heading_f >= 185 && heading_f < 265) {
+    // South West
+    heading_str += "SW";
+  } else if (heading_f >= 265 && heading_f < 275) {
+    // West
+    heading_str += "W";
+  } else if (heading_f >= 275 && heading_f < 360) {
+    // North West
+    heading_str += "NW";
+  }
+  heading_str += " - ";
+  heading_str += (String)heading_f;
+  heading_str += "deg from North";
+
+  
+  return heading_str;
+}
+
 void handle_survey_observation_in_progress() {
   if(HAM_GNSS.getSurveyInValid() == false  && survey_in_progress) { // check if survey is in progress
 
@@ -1287,6 +1447,12 @@ void handle_survey_observation_in_progress() {
       object["survey_pos_accuracy"] = (String)HAM_GNSS.getPositionAccuracy();
       object["survey_vertical_accuracy"] = (String)HAM_GNSS.getVerticalAccuracy();
       object["survey_horizontal_accuracy"] = (String)HAM_GNSS.getHorizontalAccuracy();
+      object["SIV"] = (String)HAM_GNSS.getSIV();;// create js functionality for this here  down
+      object["fix_type"] = get_fix_type();
+      object["RTK"] = get_RTK_status();
+      object["heading"] = get_heading();
+      object["PDOP"] = HAM_GNSS.getPDOP() / 100.0; // Convert pDOP scaling from 0.01 to 1
+
       serializeJson(object, jsonString);
       webSocket.broadcastTXT(jsonString);
 
