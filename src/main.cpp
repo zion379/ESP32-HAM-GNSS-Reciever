@@ -92,8 +92,7 @@ bool survey_in_progress = false;
 float survey_desired_accuracy = 6.00; // value is in meters
 
 // surveying callback functions
-void printPVTdata(UBX_NAV_PVT_data_t *ubxDataStruct);
-void newRAWX(UBX_RXM_RAWX_data_t *ubxDataStruct);
+
 
 // Web Communication json vars
 StaticJsonDocument<400> json_doc_tx;
@@ -390,35 +389,40 @@ String Send_Start_Survey_HTML() {
   page += "<h4 id='survey_msg' style='display: none; text-align: center;'></h4>\n";
   page += "<h4 id='survey_time' style='display: none; text-align: center;'></h4>\n";
   page += "<h4 id='survey_accuracy' style='display: none; text-align: center;'></h4>\n";
-  page += "<h5 id='survey_desired_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
-  page += "<label id='accuracy_input_label' for='target_accuracy_input'>Enter Target Accuracy:</label>\n";
-  page += "<input type='number' id='target_accuracy_input' name='target_accuracy_input' min='0.08' max='100'>\n";
-  page += "<button type='button' id='set_target_accuracy'> Set Target Accuracy </button>\n";
-  page += "<h5 id='pos_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
-  page += "<h5 id='vert_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
-  page += "<h5 id='horz_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += "<div style='justify-content: center; display: flex;'\n>";
+  page += " <label id='accuracy_input_label' for='target_accuracy_input'>Enter Target Accuracy:</label>\n";
+  page += " <h5 id='survey_desired_accuracy' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
+  page += " <input type='number' id='target_accuracy_input' name='target_accuracy_input' min='0.08' max='100'>\n";
+  page += " <button type='button' id='set_target_accuracy' style='text-align: center;'> Set Target Accuracy </button>\n";
+  page += "</div>\n";
+  page += "<div style='justify-content: center; display: flex;'>\n";
+  page += " <h5 id='pos_accuracy' style='display: none; text-align: center; font-weight: bold; margin: 2em;'></h5>\n";
+  page += " <h5 id='vert_accuracy' style='display: none; text-align: center; font-weight: bold; margin: 2em;'></h5>\n";
+  page += " <h5 id='horz_accuracy' style='display: none; text-align: center; font-weight: bold; margin: 2em;'></h5>\n";
+  page += "</div>\n";
   page += "<p style=\"text-align: center;\">Latitude: <span id='latitude'> lat value </span> , Longitude: <span id='longitude'> long val</span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude : <span id='altitude'> altitude value </span></p>\n";
   page += "<p style=\"text-align: center;\">Altitude above MSL : <span id='altitude_msl'> MSL Altitude Val</p>\n";
   page += "<h5 id='mean_sea_lvl' style='display: none; text-align: center; font-weight: bold;'></h5>\n";
-  page += "<div id='reciever_info' style='text-align:center display: none;'>\n"; // create js functionality to show div
-  page += " <h4 id='SIV_status'></h4>\n"; // create js functionality to update values
-  page += " <h4 id='fix_type'></h4>\n";
-  page += " <h4 id='RTK'></h4>\n";
-  page += " <h4 id='heading'></h4>\n";
-  page += " <h4 id='PDOP'></h4>\n";
+  page += "<div id='reciever_info' style='display: none; justify-content: space-evenly;'>\n";
+  page += " <div style='justify-content: space-evenly;'>\n";
+  page += "   <h4 id='fix_type' style='margin: 5px;'></h4>\n";
+  page += "   <h4 id='RTK' style='margin: 5px;'></h4>\n";
+  page += " </div>\n";
+  page += " <h4 id='heading' style='margin: 5px;'></h4>\n";
+  page += " <h4 id='PDOP' style='margin: 5px;'></h4>\n";
+  page += " <h4 id='SIV_status' style='margin: 5px;'></h4>\n";
   page += "</div>\n";
   page += "<div style='text-align: center; margin-top: 15px;'>\n";
   page += " <button type='button' id='save_survey_btn' style='display: none;'>Save Survey</button>\n";
   page += " <label id='gcp_index_label' for='gcp_index_input'>GCP Index:</label>\n";
   page += " <input type='number' id='gcp_index_input' name='gcp_index_input' min='1' max='100'>\n";
   page += "</div>\n";
-  page += "<button type='button' id='BTN_SEND_BACK' disabled> Send info to esp32 </button>\n";
   page += "<button type='button' id='start_survey' disabled> Start Survey </button>\n";
   page += "<button type='button' id='stop_survey' disabled> Stop Survey </button>\n";
+  page += "<button id='reconnect_web_socket' onclick='reconnect_web_socket' style='display:none;'>Reconnect WebSocket</button>\n";
   page += Survey_Client_WebSocketJS(); // returns string that is valid HTML
   page += "<a href=\"/\" class=\"button-link\">Home</a>\n";
-  page += "<button id='reconnect_web_socket' onclick='reconnect_web_socket()' style='display:none;'>Reconnect WebSocket</button>\n";
   page += "</body>\n";
   page += "</html>\n";
 
@@ -543,11 +547,6 @@ String Send_Device_Files_HTML() {
 String Survey_Client_WebSocketJS() {
   String script = "<script>\n";
   script += "var Socket;\n";
-  script += "document.getElementById('BTN_SEND_BACK').addEventListener('click', button_send_back);\n";
-  script += "function button_send_back() {\n";
-  script += " var message = {message: 'wassup zion u created a web socket ', date: '10-22-2000'}; \n";
-  script += " Socket.send(JSON.stringify(message));\n";
-  script += "}\n";
   script += "\n";
   script += "document.getElementById('start_survey').addEventListener('click', start_survey);\n";
   script += "function start_survey() {\n";
@@ -582,19 +581,15 @@ String Survey_Client_WebSocketJS() {
   script += "function init() {\n";
   script += " Socket = new WebSocket('ws://' + window.location.hostname + ':81/');\n";
   script += " Socket.addEventListener('open', (event) => {\n";
-  script += "   var sendMsg_btn = document.getElementById('BTN_SEND_BACK');\n";
   script += "   var start_survey_btn = document.getElementById('start_survey');\n";
-  script += "   var stop_survey_btn = document.getElementById('stop_survey');\n";
-  script += "   sendMsg_btn.disabled = false;\n";
+  script += "   var stop_survey_btn = document.getElementById('stop_survey');\n";;
   script += "   start_survey_btn.disabled = false;\n";
   script += "   stop_survey_btn.disabled = false;\n";
   script += "   document.getElementById('reconnect_web_socket').style.display = 'none';\n";
   script += " });\n";
   script += " Socket.addEventListener('close', (event) => {\n";
-  script += "   var sendMsg_btn = document.getElementById('BTN_SEND_BACK');\n";
   script += "   var start_survey_btn = document.getElementById('start_survey');\n";
   script += "   var stop_survey_btn = document.getElementById('stop_survey');\n";
-  script += "   sendMsg_btn.disabled = true;\n";
   script += "   start_survey_btn.disabled = true;\n";
   script += "   stop_survey_btn.disabled = true;\n";
   script += "   document.getElementById('reconnect_web_socket').style.display = 'block';\n";
@@ -719,7 +714,7 @@ String Survey_Client_WebSocketJS() {
   script += "     var target_accuracy_in_el = document.getElementById('target_accuracy_input');\n";
   script += "     var accuracy_in_label_el = document.getElementById('accuracy_input_label');\n";
   script += "     var accuracy_in_btn_el = document.getElementById('set_target_accuracy');\n";
-  script += "     var target_accuracy_label_el = docmentGetElementById('survey_desired_accuracy');\n";
+  script += "     var target_accuracy_label_el = document.getElementById('survey_desired_accuracy');\n";
   script += "     target_accuracy_in_el.style.display = 'none';\n";
   script += "     accuracy_in_label_el.style.display = 'none';\n";
   script += "     accuracy_in_btn_el.style.display = 'none';\n";
@@ -728,7 +723,7 @@ String Survey_Client_WebSocketJS() {
   script += " }\n";
   script += "if (obj.SIV && obj.fix_type && obj.RTK && obj.heading && obj.PDOP) {\n"; // dont forget to display div
   script += " var reciever_info_el = document.getElementById('reciever_info');\n";
-  script += " reciever_info_el.style.display = 'block';\n";
+  script += " reciever_info_el.style.display = 'flex';\n";
   script += " var SIV_el = document.getElementById('SIV_status');\n";
   script += " var fix_type_el = document.getElementById('fix_type');\n";
   script += " var RTK_el = document.getElementById('RTK');\n";
@@ -741,7 +736,7 @@ String Survey_Client_WebSocketJS() {
   script += " PDOP_el.textContent = 'PDOP: ' + obj.PDOP;\n";
   script += " } else {\n";
   script += "   var reciever_info_el = document.getElementById('reciever_info');\n";
-  script += "   reciever_info_el.style.display = 'block';\n";
+  script += "   reciever_info_el.style.display = 'none';\n";
   script += " }";
   script += "}\n";
   script += "window.onload = function(event) {\n";
@@ -1521,80 +1516,66 @@ void stop_survey_observation() {
   }
 }
 
-void printPVTdata(UBX_NAV_PVT_data_t *ubxDataStruct)
-{
-    Serial.println();
-
-    Serial.print(F("Time: ")); // Print the time
-    uint8_t hms = ubxDataStruct->hour; // Print the hours
-    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
-    Serial.print(hms);
-    Serial.print(F(":"));
-    hms = ubxDataStruct->min; // Print the minutes
-    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
-    Serial.print(hms);
-    Serial.print(F(":"));
-    hms = ubxDataStruct->sec; // Print the seconds
-    if (hms < 10) Serial.print(F("0")); // Print a leading zero if required
-    Serial.print(hms);
-    Serial.print(F("."));
-    unsigned long millisecs = ubxDataStruct->iTOW % 1000; // Print the milliseconds
-    if (millisecs < 100) Serial.print(F("0")); // Print the trailing zeros correctly
-    if (millisecs < 10) Serial.print(F("0"));
-    Serial.print(millisecs);
-
-    long latitude = ubxDataStruct->lat; // Print the latitude
-    Serial.print(F(" Lat: "));
-    Serial.print(latitude);
-
-    long longitude = ubxDataStruct->lon; // Print the longitude
-    Serial.print(F(" Long: "));
-    Serial.print(longitude);
-    Serial.print(F(" (degrees * 10^-7)"));
-
-    long altitude = ubxDataStruct->hMSL; // Print the height above mean sea level
-    Serial.print(F(" Height above MSL: "));
-    Serial.print(altitude);
-    Serial.println(F(" (mm)"));
+// working on call back functionality need to update zed-f9p chip to firmware 1.3 HPG or greater.
+void pushRXMPMP(UBX_RXM_PMP_message_data_t *pmpData) {
+  // Extract raw message payload
+  uint16_t payloadLen = ((u_int16_t)pmpData->lengthMSB << 8) | (u_int16_t)pmpData->lengthLSB;
+  Serial.print("New RXM-PMP data received. Message payload length is ");
+  Serial.println(payloadLen);
+  Serial.println(" Bytes. Pushing it to the GNSS...");
+  HAM_GNSS.pushRawData(&pmpData->sync1, (size_t)payloadLen + 6); // Push the sync chars, class, ID, length and payload
+  HAM_GNSS.pushRawData(&pmpData->checksumA, (size_t)2);
 }
 
-void newRAWX(UBX_RXM_RAWX_data_t *ubxDataStruct)
+void printRXMCOR(UBX_RXM_COR_data_t *ubxDataStruct)
 {
+  Serial.print(F("UBX-RXM-COR:  ebno: "));
+  Serial.print((double)ubxDataStruct->ebno / 8, 3); //Convert ebno to dB
+
+  Serial.print(F("  protocol: "));
+  if (ubxDataStruct->statusInfo.bits.protocol == 1)
+    Serial.print(F("RTCM3"));
+  else if (ubxDataStruct->statusInfo.bits.protocol == 2)
+    Serial.print(F("SPARTN"));
+  else if (ubxDataStruct->statusInfo.bits.protocol == 29)
+    Serial.print(F("PMP (SPARTN)"));
+  else if (ubxDataStruct->statusInfo.bits.protocol == 30)
+    Serial.print(F("QZSSL6"));
+  else
+    Serial.print(F("Unknown"));
+
+  Serial.print(F("  errStatus: "));
+  if (ubxDataStruct->statusInfo.bits.errStatus == 1)
+    Serial.print(F("Error-free"));
+  else if (ubxDataStruct->statusInfo.bits.errStatus == 2)
+    Serial.print(F("Erroneous"));
+  else
+    Serial.print(F("Unknown"));
+
+  Serial.print(F("  msgUsed: "));
+  if (ubxDataStruct->statusInfo.bits.msgUsed == 1)
+    Serial.print(F("Not used"));
+  else if (ubxDataStruct->statusInfo.bits.msgUsed == 2)
+    Serial.print(F("Used"));
+  else
+    Serial.print(F("Unknown"));
+
+  Serial.print(F("  msgEncrypted: "));
+  if (ubxDataStruct->statusInfo.bits.msgEncrypted == 1)
+    Serial.print(F("Not encrypted"));
+  else if (ubxDataStruct->statusInfo.bits.msgEncrypted == 2)
+    Serial.print(F("Encrypted"));
+  else
+    Serial.print(F("Unknown"));
+
+  Serial.print(F("  msgDecrypted: "));
+  if (ubxDataStruct->statusInfo.bits.msgDecrypted == 1)
+    Serial.print(F("Not decrypted"));
+  else if (ubxDataStruct->statusInfo.bits.msgDecrypted == 2)
+    Serial.print(F("Successfully decrypted"));
+  else
+    Serial.print(F("Unknown"));
+
   Serial.println();
-
-  Serial.print(F("New RAWX data received. It contains "));
-  Serial.print(ubxDataStruct->header.numMeas); // Print numMeas (Number of measurements / blocks)
-  Serial.println(F(" data blocks:"));
-
-  for (uint8_t block = 0; block < ubxDataStruct->header.numMeas; block++) // For each block
-  {
-    Serial.print(F("GNSS ID: "));
-    if (ubxDataStruct->blocks[block].gnssId < 100) Serial.print(F(" ")); // Align the gnssId
-    if (ubxDataStruct->blocks[block].gnssId < 10) Serial.print(F(" ")); // Align the gnssId
-    Serial.print(ubxDataStruct->blocks[block].gnssId);
-    Serial.print(F("  SV ID: "));
-    if (ubxDataStruct->blocks[block].svId < 100) Serial.print(F(" ")); // Align the svId
-    if (ubxDataStruct->blocks[block].svId < 10) Serial.print(F(" ")); // Align the svId
-    Serial.print(ubxDataStruct->blocks[block].svId);
-
-    if (sizeof(double) == 8) // Check if our processor supports 64-bit double
-    {
-      // Convert prMes from uint8_t[8] to 64-bit double
-      // prMes is little-endian
-      double pseudorange;
-      memcpy(&pseudorange, &ubxDataStruct->blocks[block].prMes, 8);
-      Serial.print(F("  PR: "));
-      Serial.print(pseudorange, 3);
-
-      // Convert cpMes from uint8_t[8] to 64-bit double
-      // cpMes is little-endian
-      double carrierPhase;
-      memcpy(&carrierPhase, &ubxDataStruct->blocks[block].cpMes, 8);
-      Serial.print(F(" m  CP: "));
-      Serial.print(carrierPhase, 3);
-      Serial.print(F(" cycles"));
-    }
-    Serial.println();
-  }
 }
 
